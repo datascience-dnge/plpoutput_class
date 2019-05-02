@@ -129,7 +129,8 @@ class plpout:
                         plpbar_final=plpbars.join(df_ordhid,(["hidro","mes"])).drop("mes","hidro")
                 else:
                         plpbar_final=plpbars.withColumnRenamed("Hidro","Index").drop("mes")
-
+		
+		return plpbar_final
 
 	def plpcen_hor(self):
 		df_ordhid=self.ordhid()
