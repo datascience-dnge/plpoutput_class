@@ -6,7 +6,7 @@ import pandas as pd
 
 
 class plpout:
-	def  __init__(self,spark,base,case_std,date,ruta="bases",ord_hid=False,ver="GGNE",horario=False):
+	def  __init__(self,spark,base,case_std,date,ruta="bases",ord_hid=False,ver="GGNE",horario=False,sep="-"):
 
 		self.base=base
 		self.spark=spark
@@ -17,22 +17,30 @@ class plpout:
 		self.path=base+"/"+date+"/"+case_std
 		self.ver=ver
 		self.horario=horario
+		self.sep=sep
 
-	def clientes(self,filename): 
+	def clientes(self,filename=None): 
 		ruta=self.ruta
 		spark=self.spark
 
-		#importar archivos de base
-		clientes=spark.read.format("csv")\
-					  .options(header=True,inferSchema=True)\
-					  .load(ruta+'/'+filename+'.csv')
+		if filename =! None
 
-		#Limpieza de data de clientes
-		clientes=clientes.withColumn("Fecha",(unix_timestamp("Fecha","dd-MM-yyyy")+(col("Hora")-1)*3600).cast("timestamp"))\
-				 .selectExpr("Fecha as fecha","Retiros as fisico","cliente","barra_1 as barnom","contrato as descripcion")\
-				 .withColumn("barnom",lower(rtrim(ltrim(col("barnom")))))
+			#importar archivos de base
+			clientes=spark.read.format("csv")\
+					   .options(header=True,inferSchema=True)\
+					   .load(ruta+'/'+filename+'.csv')
 
+			#Limpieza de data de clientes
+			clientes=clientes.withColumn("Fecha",(unix_timestamp("Fecha","dd-MM-yyyy")+(col("Hora")-1)*3600).cast("timestamp"))\
+				 	.selectExpr("Fecha as fecha","Retiros as fisico","cliente","barra_1 as barnom","contrato as descripcion")\
+				 	.withColumn("barnom",lower(rtrim(ltrim(col("barnom")))))
+		
+		else:
+			 clientes=spark.sql("select * from bases_clientes.retiros_proy")
+		
 		return clientes		   
+
+
 
 	def to_df(self,filename):
 		path=self.path
@@ -43,11 +51,13 @@ class plpout:
 		return df
 
 	def etapas(self):
+		sep=self.sep
  		etapas_df=self.to_df("etapas")\
         		      .withColumnRenamed("#Bloque","Bloque")\
 			      .withColumnRenamed(" Categoria","Categoria")\
-			      .withColumn("Fecha",(unix_timestamp(" Fecha","dd-MM-yyyy").cast("timestamp")))\
+			      .withColumn("Fecha",(unix_timestamp(" Fecha","dd"+sep+"MM"+sep+"yyyy").cast("timestamp")))\
 			      .drop(" Fecha")
+				
 		return etapas_df
 
 	def indhor(self):
@@ -186,9 +196,9 @@ class plpout:
 				       .withColumn("cennom",ltrim(rtrim(col("cennom"))))
 		return centrales_df
 
-	def iny_ret(self,retcsv):
+	def iny_ret(self):
 		
-		clientes_df=self.clientes(retcsv)
+		clientes_df=self.clientes()
 		plpbar_final=self.plpbar()
 		plpcen_final=self.plpcen()
 		centrales=self.centrales()
@@ -222,12 +232,25 @@ class plpout:
 		balance=iny_val.unionAll(ret_val).withColumn("caso",lit(date+"_"+case_std))
 	    
 		return balance,plpbar_final,plpcen_final
-
-	def saveToHive(self,df,table,db,hivemode):
-		spark=self.spark
+	
+	@staticmethod
+	def saveToHive(df,table,db,hivemode,partition=["index","caso"],spark=spark):
 		spark.sql("create database if not exists "+db)
 
 		if hivemode=='new':
-			df.write.format("parquet").partitionBy("Index","caso").saveAsTable(db+"."+table)
+			df.write.format("parquet").partitionBy(partition).saveAsTable(db+"."+table)
 		else:
-			df.write.format("parquet").mode(hivemode).partitionBy("Index","caso").saveAsTable(db+"."+table)
+			df.write.format("parquet").mode(hivemode).partitionBy(partition).saveAsTable(db+"."+table)
+
+
+	def delete_hdfs(self):
+		path=self.path
+		spark=self.spark
+		sc=spark.sparkContext
+		fs = (sc._jvm.org
+      			.apache.hadoop
+      			.fs.FileSystem
+      			.get(sc._jsc.hadoopConfiguration())
+      			)
+		
+		fs.delete(sc._jvm.org.apache.hadoop.fs.Path(path), True) 
